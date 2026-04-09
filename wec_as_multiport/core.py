@@ -109,6 +109,13 @@ class WEC:
         return 1/self.Zpto[1, 0] * np.array([
             [self.Zpto[0, 0], self.__detZpto__],
             [np.ones_like(self.omega), self.Zpto[1, 1]]])
+    
+    @property
+    def Bpto(self) -> np.ndarray:
+        """PTO matrix in inverse ABCD form, aka B form"""
+        ABCD_square = np.transpose(self.ABCDpto, [2, 0, 1])
+        inv_ABCD = np.linalg.inv(ABCD_square)
+        return np.transpose(inv_ABCD, [1, 2, 0])
 
     @property
     def Hpto(self) -> np.ndarray:
@@ -147,8 +154,8 @@ class WEC:
         return fn
 
     @property
-    def Zl_opt_mech(self) -> np.ndarray:
-        """Load impedance for optimal mechanical power"""
+    def Zl_opt_abs(self) -> np.ndarray:
+        """Load impedance for optimal absorberd power"""
         Zlm = np.conj(self.Zi)
         return self.Zpto[0, 1]*self.Zpto[1, 0] / (self.Zpto[0, 0] - Zlm) \
             - self.Zpto[1, 1]
@@ -250,22 +257,22 @@ class WEC:
         # return np.einsum('mnf,nkf->mkf', self.invABCDpto, vars_in)
         return np.einsum('mnf,nkf->mkf', self.Bpto, vars_in)
 
-    def power_mech(self, Fexc, Zl=None) -> np.array:
-        """Complex power at PTO input"""
+    def power_abs(self, Fexc, Zl=None) -> np.array:
+        """Complex absorbed power at PTO input"""
         Fpto, v = self.power_variables_in(Fexc=Fexc, Zl=Zl)
         return 1/2*np.conj(np.squeeze(Fpto))*np.squeeze(v)
 
-    def active_power_mech(self, Fexc, Zl=None) -> np.array:
-        """Active power at PTO input"""
-        return __active_power__(self.power_mech(Fexc, Zl))
+    def active_power_abs(self, Fexc, Zl=None) -> np.array:
+        """Active absorbed power at PTO input"""
+        return __active_power__(self.power_abs(Fexc, Zl))
 
-    def reactive_power_mech(self, Fexc, Zl=None) -> np.array:
-        """Reactive power at PTO input"""
-        return __reactive_power__(self.power_mech(Fexc, Zl))
+    def reactive_power_abs(self, Fexc, Zl=None) -> np.array:
+        """Reactive absorbed power at PTO input"""
+        return __reactive_power__(self.power_abs(Fexc, Zl))
 
-    def apparent_power_mech(self, Fexc, Zl=None) -> np.array:
-        """Apparent power at PTO input"""
-        return __apparent_power__(self.power_mech(Fexc, Zl))
+    def apparent_power_abs(self, Fexc, Zl=None) -> np.array:
+        """Apparent absorbed power at PTO input"""
+        return __apparent_power__(self.power_abs(Fexc, Zl))
 
     def power(self, Fexc, Zl=None) -> np.array:
         """Complex power at load"""
@@ -289,9 +296,14 @@ class WEC:
         """Maximum active power"""
         return __max_active_power__(self.Z_Thevenin, self.F_Thevenin(Fexc))
 
-    def max_active_power_mech(self, Fexc) -> np.array:
-        """Maximum active mechanical power"""
+    def max_active_power_abs(self, Fexc) -> np.array:
+        """Maximum active absorbed power"""
         return __max_active_power__(self.Zi, Fexc)
+    
+    def max_active_power_use(self, Fexc) -> np.array:
+        """Maximum active usefull power"""
+        R11 = np.real(np.mean(self.Zpto[0,0,:])) 
+        return __max_active_power__(self.Zi + R11, Fexc)
 
     def pi_analytic(self, freq) -> tuple:
         """Optimal PI gains for a controller acting on current and shaft speed
@@ -314,7 +326,7 @@ class WEC:
                         Zl_C = self.Zl_C(self.pid_controller(kp=kp))
                 if obj == 'elec':
                         P = -1*self.active_power(Fexc=Fexc, Zl=Zl_C)
-                elif obj == 'mech':
+                elif obj == 'abs':
                         Fpto, v = self.power_variables_in(Fexc=Fexc, Zl=Zl_C)
                         P = np.real(-1/2 * np.conj(np.squeeze(Fpto))*np.squeeze(v))
                 return P
