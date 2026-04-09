@@ -13,6 +13,8 @@ from matplotlib.axes import Axes
 from matplotlib.sankey import Sankey
 from typing import Tuple
 
+import matplotlib.pyplot as plt
+
 def figsize(wf=1, hf=1, columnwidth=250):
     """Parameters:
       - wf [float]:  width fraction in columnwidth units
@@ -123,10 +125,7 @@ def __dispersion__(k, w, h=None, g=9.81):
         h = np.infty
     return w**2 - g * k * np.tanh(k * h)
 
-from matplotlib.figure import Figure
-from matplotlib.axes import Axes
-from matplotlib.sankey import Sankey
-from typing import Tuple
+
 def power_flow_colors():
     """
     Define and return a dictionary of colors to represent different stages of the power flow through a WEC.
