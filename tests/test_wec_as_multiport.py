@@ -8,9 +8,12 @@ import wec_as_multiport as wam
 import wecopttool as wot
 import capytaine as cpy
 
-bem_data_fname = os.path.join(os.path.dirname(__file__),
-                              '..', 'data', 'wec_as_multiport.nc')
+# bem_data_fname = os.path.join(os.path.dirname(__file__),
+#                               '..', 'data', 'wec_as_multiport.nc')
 
+bem_data_dir = os.path.join(os.path.dirname(__file__),
+                              '..', 'data')
+bem_data_fname = os.path.join(bem_data_dir, 'wec_as_multiport.nc')
 
 @pytest.fixture(scope="module")
 def bem_data():
@@ -35,6 +38,9 @@ def bem_data():
         bem_data['excitation_force'] = bem_data['diffraction_force'] + \
             bem_data['Froude_Krylov_force']
         bem_data = wot.add_linear_friction(bem_data)
+        if not os.path.isdir(bem_data_dir):
+            os.makedirs(bem_data_dir)
+        wot.write_netcdf(bem_data_fname, bem_data)
     return bem_data
 
 
@@ -73,10 +79,10 @@ def test_low_freq_wave_hydrostatics(wec):
 
 
 def test_Zin_matching(wec):
-    """PTO input impedance when maximizing mechanical power should 
+    """PTO input impedance when maximizing absorbed power should 
     equal the complex conjugate of the intrinsic impedance"""
 
-    Z1 = wec.Zin(Zl=wec.Zl_opt_mech)
+    Z1 = wec.Zin(Zl=wec.Zl_opt_abs)
     Z2 = np.conj(wec.Zi)
 
     np.testing.assert_allclose(Z1, Z2)
@@ -106,7 +112,7 @@ def test_reflection(wec):
     """Should see power reflection with imperfect matching"""
 
     Gamma = wam.power_reflection_coefficient(Zs=wec.Z_Thevenin,
-                                             Zl=wec.Zl_opt_mech)
+                                             Zl=wec.Zl_opt_abs)
 
     np.testing.assert_array_less(np.zeros_like(Gamma), Gamma)
 
@@ -218,11 +224,11 @@ class TestPerfomanceAtFreqs:
 
         assert pow == pytest.approx(max_pow)
 
-    def test_max_mech_power(self, wec, Fexc):
-        """Max. mechanical power from two functions"""
+    def test_max_abs_power(self, wec, Fexc):
+        """Max. absorbed power from two functions"""
         
-        pow_in_max1 = wec.active_power_mech(Fexc=Fexc, Zl=wec.Zl_opt_mech)
-        pow_in_max2 = wec.max_active_power_mech(Fexc=Fexc)
+        pow_in_max1 = wec.active_power_abs(Fexc=Fexc, Zl=wec.Zl_opt_abs)
+        pow_in_max2 = wec.max_active_power_abs(Fexc=Fexc)
 
         np.testing.assert_allclose(pow_in_max1, pow_in_max2)
 
@@ -254,7 +260,14 @@ class TestPerfomanceAtFreqs:
 
         tpg = wec.transducer_power_gain(Zl=pi_load_impedance)
         pow_load = wec.active_power(Fexc=Fexc, Zl=pi_load_impedance)
-        pow_in_max = wec.max_active_power_mech(Fexc=Fexc)
-        tpg_pow = pow_load / pow_in_max
+        pow_in_max = wec.max_active_power_abs(Fexc=Fexc)
+        mask = ~np.isclose(pow_in_max, 0.0)
+        #deal with zero division by setting gain to zero where max input power is zero
+        tpg_pow = np.divide(    
+            pow_load,
+            pow_in_max,
+            out=np.zeros_like(pow_load, dtype=float),
+            where=mask,
+)
 
         assert tpg[freq_ind] == pytest.approx(tpg_pow[freq_ind])

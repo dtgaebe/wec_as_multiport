@@ -290,7 +290,9 @@ class WEC:
         """Complex power at load"""
         if Zl is None:
             Zl = self.Zl_opt
-        Vout, Iout = self.power_variables_out(Fexc=Fexc, Zl=Zl)
+        vars_out = self.power_variables_out(Fexc=Fexc, Zl=Zl)
+        Vout = vars_out[0].squeeze()
+        Iout = vars_out[1].squeeze()
         return __power__(Vout, Iout)
     def radiated_power(self, Fexc, Zl=None) -> np.array:
         """Radiated power"""
