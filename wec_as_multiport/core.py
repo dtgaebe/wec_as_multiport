@@ -109,6 +109,13 @@ class WEC:
         return 1/self.Zpto[1, 0] * np.array([
             [self.Zpto[0, 0], self.__detZpto__],
             [np.ones_like(self.omega), self.Zpto[1, 1]]])
+    
+    @property
+    def Bpto(self) -> np.ndarray:
+        """PTO matrix in inverse ABCD form, aka B form"""
+        ABCD_square = np.transpose(self.ABCDpto, [2, 0, 1])
+        inv_ABCD = np.linalg.inv(ABCD_square)
+        return np.transpose(inv_ABCD, [1, 2, 0])
 
     @property
     def Hpto(self) -> np.ndarray:
@@ -147,8 +154,8 @@ class WEC:
         return fn
 
     @property
-    def Zl_opt_mech(self) -> np.ndarray:
-        """Load impedance for optimal mechanical power"""
+    def Zl_opt_abs(self) -> np.ndarray:
+        """Load impedance for optimal absorberd power"""
         Zlm = np.conj(self.Zi)
         return self.Zpto[0, 1]*self.Zpto[1, 0] / (self.Zpto[0, 0] - Zlm) \
             - self.Zpto[1, 1]
@@ -250,28 +257,51 @@ class WEC:
         # return np.einsum('mnf,nkf->mkf', self.invABCDpto, vars_in)
         return np.einsum('mnf,nkf->mkf', self.Bpto, vars_in)
 
-    def power_mech(self, Fexc, Zl=None) -> np.array:
-        """Complex power at PTO input"""
-        Fpto, v = self.power_variables_in(Fexc=Fexc, Zl=Zl)
-        return 1/2*np.conj(np.squeeze(Fpto))*np.squeeze(v)
+    def power_abs(self, Fexc, Zl=None) -> np.array:
+        """Complex absorbed power at PTO input"""
+        Fpto, vel = self.power_variables_in(Fexc=Fexc, Zl=Zl)
+        return 1/2*np.conj(np.squeeze(Fpto))*np.squeeze(vel)
+    def power_loss_mech(self, Fexc, Zl=None) -> np.array:
+        R11 = np.real(np.mean(self.Zpto[0,0,:])) 
+        _, vel = self.power_variables_in(Fexc=Fexc, Zl=Zl)
+        return 1/2 * R11*np.abs(vel)**2
+    
+    def power_use(self, Fexc, Zl=None) -> np.array:
+        """Complex useful power inside the PTO"""
+        Ploss_mech = self.power_loss_mech(Fexc, Zl=Zl)
+        Pabs = self.power_abs(Fexc, Zl=Zl)
+        return Pabs - Ploss_mech
 
-    def active_power_mech(self, Fexc, Zl=None) -> np.array:
-        """Active power at PTO input"""
-        return __active_power__(self.power_mech(Fexc, Zl))
+    def active_power_abs(self, Fexc, Zl=None) -> np.array:
+        """Active absorbed power at PTO input"""
+        return __active_power__(self.power_abs(Fexc, Zl))
+    def active_power_use(self, Fexc, Zl=None) -> np.array:
+        """Active useful power inside the PTO"""
+        return __active_power__(self.power_use(Fexc, Zl))
+    def reactive_power_abs(self, Fexc, Zl=None) -> np.array:
+        """Reactive absorbed power at PTO input"""
+        return __reactive_power__(self.power_abs(Fexc, Zl))
 
-    def reactive_power_mech(self, Fexc, Zl=None) -> np.array:
-        """Reactive power at PTO input"""
-        return __reactive_power__(self.power_mech(Fexc, Zl))
-
-    def apparent_power_mech(self, Fexc, Zl=None) -> np.array:
-        """Apparent power at PTO input"""
-        return __apparent_power__(self.power_mech(Fexc, Zl))
+    def apparent_power_abs(self, Fexc, Zl=None) -> np.array:
+        """Apparent absorbed power at PTO input"""
+        return __apparent_power__(self.power_abs(Fexc, Zl))
 
     def power(self, Fexc, Zl=None) -> np.array:
         """Complex power at load"""
         if Zl is None:
             Zl = self.Zl_opt
-        return __power__(self.Zpto, self.Zi, Fexc, Zl)
+        Vout, Iout = self.power_variables_out(Fexc=Fexc, Zl=Zl)
+        return __power__(Vout, Iout)
+    def radiated_power(self, Fexc, Zl=None) -> np.array:
+        """Radiated power"""
+        Ri = np.real(self.Zi)
+        _, vel = self.power_variables_in(Fexc=Fexc, Zl=Zl)
+        return __radiated_power__(Ri, vel)
+
+    def excitation_power(self, Fexc, Zl=None) -> np.array:
+        """Excitation power"""
+        _, vel = self.power_variables_in(Fexc=Fexc, Zl=Zl)
+        return __active_power__(__excitation_power__(Fexc, vel))
 
     def active_power(self, Fexc, Zl=None) -> np.array:
         """Active power at load"""
@@ -289,9 +319,14 @@ class WEC:
         """Maximum active power"""
         return __max_active_power__(self.Z_Thevenin, self.F_Thevenin(Fexc))
 
-    def max_active_power_mech(self, Fexc) -> np.array:
-        """Maximum active mechanical power"""
+    def max_active_power_abs(self, Fexc) -> np.array:
+        """Maximum active absorbed power"""
         return __max_active_power__(self.Zi, Fexc)
+    
+    def max_active_power_use(self, Fexc) -> np.array:
+        """Maximum active usefull power"""
+        R11 = np.real(np.mean(self.Zpto[0,0,:])) 
+        return __max_active_power__(self.Zi + R11, Fexc)
 
     def pi_analytic(self, freq) -> tuple:
         """Optimal PI gains for a controller acting on current and shaft speed
@@ -314,7 +349,7 @@ class WEC:
                         Zl_C = self.Zl_C(self.pid_controller(kp=kp))
                 if obj == 'elec':
                         P = -1*self.active_power(Fexc=Fexc, Zl=Zl_C)
-                elif obj == 'mech':
+                elif obj == 'abs':
                         Fpto, v = self.power_variables_in(Fexc=Fexc, Zl=Zl_C)
                         P = np.real(-1/2 * np.conj(np.squeeze(Fpto))*np.squeeze(v))
                 return P
@@ -346,6 +381,54 @@ class WEC:
 
     def copy(self):
         return copy.deepcopy(self)
+    
+    
+    def calc_power_flows_dictionary(self, Fexc, Zl=None):
+
+        if Zl is None:
+                Zl = self.Zl_opt
+
+        power_flows = {
+            'Optimal Excitation' : 2*np.sum(self.max_active_power_abs(Fexc=Fexc)),#eq 6.68 
+            'Max Absorbed': np.sum(self.max_active_power_abs(Fexc=Fexc)),
+            'Max Useful': np.sum(self.max_active_power_use(Fexc=Fexc)),
+            'Radiated': np.sum(self.radiated_power(Fexc=Fexc, Zl=Zl)), 
+            'Excitation': np.sum(self.excitation_power(Fexc=Fexc, Zl=Zl)), 
+            'Electrical': np.sum(self.active_power(Fexc=Fexc, Zl=Zl)), 
+            'Useful': np.sum(self.active_power_use(Fexc=Fexc, Zl=Zl)), 
+                        }
+        power_flows['Absorbed'] =  (
+            power_flows['Excitation'] 
+            - power_flows['Radiated']
+                )
+        power_flows['Deficit Excitation'] =  (
+            power_flows['Optimal Excitation'] 
+            - power_flows['Excitation']
+                )
+        power_flows['Deficit Absorbed'] =  (
+            power_flows['Max Absorbed'] 
+            - power_flows['Absorbed']
+                ) 
+        power_flows['Deficit Radiated'] =  (
+            power_flows['Deficit Excitation'] 
+            - power_flows['Deficit Absorbed']
+                )   
+        power_flows['PTO Loss Mechanical'] = (
+            power_flows['Absorbed'] 
+            -  power_flows['Useful']
+                )  
+        power_flows['PTO Loss Electrical'] = (
+            power_flows['Useful'] 
+            -  power_flows['Electrical']
+                )
+        return power_flows
+    
+    def plot_power_flow(self, Fexc, Zl=None):
+        if Zl is None:
+            Zl = self.Zl_opt
+        power_flows = self.calc_power_flows_dictionary(Fexc=Fexc, Zl=Zl)
+        util.plot_power_flow(power_flows)
+
 
 
 def __max_active_power__(Z, F):
@@ -360,13 +443,19 @@ def __F_Thevenin__(Zpto, Zi, Fexc):
     return Fexc*Zpto[1, 0] / (Zi + Zpto[0, 0])
 
 
-def __power__(Zpto, Zi, Fexc, Zl=None) -> np.ndarray:
+def __power__(Vout, Iout) -> np.ndarray:
     # TODO - define in terms of flow and effort
-    return np.abs(Fexc*Zpto[1, 0]
-                  / ((Zpto[1, 1] + Zl)*(Zi + Zpto[0, 0]) -
-                      Zpto[1, 0]*Zpto[0, 1]))**2 * 1/2*Zl
 
+    # return np.abs(Fexc*Zpto[1, 0]
+    #               / ((Zpto[1, 1] + Zl)*(Zi + Zpto[0, 0]) -
+    #                   Zpto[1, 0]*Zpto[0, 1]))**2 * 1/2*Zl
+    return 1/2*np.conj(Vout)*(Iout)
 
+def __radiated_power__(Ri, vel):
+    return 1/2 * (Ri*np.abs(vel)**2)
+
+def __excitation_power__(Fexc, vel):
+    return 1/4 * (Fexc*np.conj(vel) + np.conj(Fexc)*vel)
 def __active_power__(power):
     return np.real(power)
 
@@ -417,3 +506,4 @@ def power_transmission_coefficient(Zs, Zl) -> np.ndarray:
     """
 
     return 1 - power_reflection_coefficient(Zs=Zs, Zl=Zl)
+
